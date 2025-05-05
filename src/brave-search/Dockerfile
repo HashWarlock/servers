@@ -20,4 +20,7 @@ ENV NODE_ENV=production
 
 RUN npm ci --ignore-scripts --omit-dev
 
+# Expose port 3000 for SSE server
+EXPOSE 3000
+
 ENTRYPOINT ["node", "dist/index.js"]

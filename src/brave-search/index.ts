@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express, { Request, Response } from "express";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+
+const app = express();
 
 const WEB_SEARCH_TOOL: Tool = {
   name: "brave_web_search",
@@ -365,9 +368,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function runServer() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Brave Search MCP Server running on stdio");
+  // To support multiple simultaneous connections we have a lookup object from
+  // sessionId to transport
+  const transports: {[sessionId: string]: SSEServerTransport} = {};
+
+  // SSE endpoint
+  app.get("/sse", async (_: Request, res: Response) => {
+    const transport = new SSEServerTransport('/messages', res);
+    transports[transport.sessionId] = transport;
+
+    res.on("close", () => {
+      delete transports[transport.sessionId];
+    });
+
+    await server.connect(transport);
+  });
+
+  // Message endpoint for handling incoming messages
+  app.post("/messages", async (req: Request, res: Response) => {
+    const sessionId = req.query.sessionId as string;
+    const transport = transports[sessionId];
+    if (transport) {
+      await transport.handlePostMessage(req, res);
+    } else {
+      res.status(400).send('No transport found for sessionId');
+    }
+  });
+
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.error(`Brave Search MCP Server running on port ${PORT}`);
+  });
+  // const transport = new StdioServerTransport();
+  // await server.connect(transport);
+  // console.error("Brave Search MCP Server running on stdio");
 }
 
 runServer().catch((error) => {
